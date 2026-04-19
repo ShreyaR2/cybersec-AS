@@ -13,7 +13,7 @@ REGISTRY_PATH = Path.home() / ".honeyfile_registry.json"
 EVIDENCE_DIR = Path.home() / "honeyfile_evidence"
 EVIDENCE_DIR.mkdir(exist_ok=True)
 
-# ── Weighted scoring thresholds ──────────────────────────────────────────────
+# ── Weighted scoring thresholds 
 SCORE_ENCRYPTED_FILE = 50  # .encrypted file appeared
 SCORE_HIGH_ENTROPY = 30  # entropy jumped to near-random
 SCORE_HEADER_CHANGED = 15  # magic bytes no longer match original
@@ -28,11 +28,10 @@ def load_registry():
     return {}
 
 
-# ── Crypto-forensics helpers ─────────────────────────────────────────────────
-
+# ── Crypto-forensics helpers
 
 def file_entropy(path):
-    """Shannon entropy of a file (0-8 bits). Encrypted/compressed ≈ 7.5-8."""
+   
     try:
         data = Path(path).read_bytes()
         if not data:
@@ -45,7 +44,7 @@ def file_entropy(path):
 
 
 def header_changed(path, original_header_hex):
-    """True if the first 16 bytes no longer match what we recorded at seed time."""
+    """if the first 16 bytes no longer match what we recorded at seed time."""
     try:
         current = Path(path).read_bytes()[:16].hex()
         return current != original_header_hex
