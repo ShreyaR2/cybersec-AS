@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>EntropyShield — Live Defense Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:        #040b0f;
+    --panel:     #080f14;
+    --border:    #0d2233;
+    --accent:    #00d4ff;
+    --green:     #00ff88;
+    --yellow:    #ffd200;
+    --red:       #ff2d55;
+    --orange:    #ff6b00;
+    --dim:       #1a3a4a;
+    --text:      #c8dde8;
+    --subtext:   #4a7a8a;
+    --mono:      'Share Tech Mono', monospace;
+    --sans:      'Rajdhani', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,212,255,0.015) 2px,
+      rgba(0,212,255,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 32px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, #040b0f 0%, #061420 100%);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .logo-icon {
+    width: 38px; height: 38px;
+    border: 1.5px solid var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 18px;
+    color: var(--accent);
+    box-shadow: 0 0 14px rgba(0,212,255,0.3);
+    animation: iconPulse 3s ease-in-out infinite;
+  }
+
+  @keyframes iconPulse {
+    0%,100% { box-shadow: 0 0 14px rgba(0,212,255,0.3); }
+    50%      { box-shadow: 0 0 28px rgba(0,212,255,0.6); }
+  }
+
+  .logo-text { font-size: 22px; font-weight: 700; letter-spacing: 2px; color: #fff; }
+  .logo-sub  { font-family: var(--mono); font-size: 11px; color: var(--subtext); letter-spacing: 3px; margin-top: 1px; }
+
+  .header-right { display: flex; align-items: center; gap: 24px; }
+
+  .status-dot {
+    display: flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12px; color: var(--subtext);
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  .dot.offline { background: var(--subtext); box-shadow: none; animation: none; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  #clock { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 1px; }
+
+  /* ── Main layout ── */
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 16px;
+    padding: 20px 28px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* ── Panel base ── */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.4;
+  }
+
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--subtext);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  /* ── Stat cards row ── */
+  .stats-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+
+  .stat-card.alert-active { border-color: var(--red); }
+  .stat-card.alert-active::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(255,45,85,0.04);
+    animation: cardFlash 1s ease-in-out infinite;
+  }
+  @keyframes cardFlash { 0%,100%{opacity:0} 50%{opacity:1} }
+
+  .stat-label {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 2.5px; color: var(--subtext);
+    text-transform: uppercase; margin-bottom: 10px;
+  }
+
+  .stat-value {
+    font-size: 42px; font-weight: 700;
+    line-height: 1; letter-spacing: -1px;
+    color: #fff;
+  }
+
+  .stat-value.green  { color: var(--green);  text-shadow: 0 0 20px rgba(0,255,136,0.4); }
+  .stat-value.red    { color: var(--red);    text-shadow: 0 0 20px rgba(255,45,85,0.4); }
+  .stat-value.yellow { color: var(--yellow); text-shadow: 0 0 20px rgba(255,210,0,0.4); }
+  .stat-value.accent { color: var(--accent); text-shadow: 0 0 20px rgba(0,212,255,0.4); }
+
+  .stat-sub { font-family: var(--mono); font-size: 11px; color: var(--subtext); margin-top: 6px; }
+
+  /* ── Score chart ── */
+  .chart-panel { grid-column: 1 / 3; }
+  .chart-wrap  { height: 200px; position: relative; }
+
+  /* ── Score breakdown ── */
+  .breakdown-panel { grid-column: 3 / 4; }
+
+  .signal-row {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px; padding: 10px 12px;
+    border-radius: 6px;
+    background: rgba(13,34,51,0.5);
+    border: 1px solid var(--border);
+    transition: all 0.4s;
+  }
+
+  .signal-row.triggered {
+    border-color: var(--red);
+    background: rgba(255,45,85,0.07);
+  }
+
+  .signal-icon {
+    width: 28px; height: 28px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    background: var(--dim);
+    flex-shrink: 0;
+  }
+
+  .signal-row.triggered .signal-icon { background: rgba(255,45,85,0.2); }
+
+  .signal-info { flex: 1; }
+  .signal-name { font-weight: 600; font-size: 13px; color: var(--text); }
+  .signal-desc { font-family: var(--mono); font-size: 10px; color: var(--subtext); margin-top: 2px; }
+
+  .signal-pts {
+    font-family: var(--mono); font-size: 16px; font-weight: 700;
+    color: var(--subtext);
+  }
+  .signal-row.triggered .signal-pts { color: var(--red); }
+
+  /* ── Alerts feed ── */
+  .alerts-panel { grid-column: 1 / -1; }
+
+  .alerts-list { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; }
+  .alerts-list::-webkit-scrollbar { width: 4px; }
+  .alerts-list::-webkit-scrollbar-track { background: var(--border); }
+  .alerts-list::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 2px; }
+
+  .alert-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(8,15,20,0.8);
+    animation: slideIn 0.4s ease-out;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-16px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .alert-item.critical { border-color: var(--red);    background: rgba(255,45,85,0.06); }
+  .alert-item.high     { border-color: var(--orange);  background: rgba(255,107,0,0.06); }
+  .alert-item.medium   { border-color: var(--yellow); background: rgba(255,210,0,0.06); }
+
+  .alert-severity {
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    letter-spacing: 2px; padding: 4px 8px; border-radius: 3px;
+    text-transform: uppercase;
+  }
+  .alert-severity.critical { background: rgba(255,45,85,0.2);  color: var(--red);    border: 1px solid var(--red); }
+  .alert-severity.high     { background: rgba(255,107,0,0.2);  color: var(--orange); border: 1px solid var(--orange); }
+  .alert-severity.medium   { background: rgba(255,210,0,0.2);  color: var(--yellow); border: 1px solid var(--yellow); }
+
+  .alert-body {}
+  .alert-title { font-weight: 600; font-size: 14px; color: #fff; }
+  .alert-meta  { font-family: var(--mono); font-size: 11px; color: var(--subtext); margin-top: 3px; }
+
+  .alert-score {
+    font-family: var(--mono); font-size: 22px; font-weight: 700;
+    color: var(--red); text-align: right;
+  }
+  .alert-score span { display: block; font-size: 10px; color: var(--subtext); letter-spacing: 1px; }
+
+  .btn-terminate {
+    padding: 7px 14px; border-radius: 4px;
+    background: rgba(255,45,85,0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 1px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .btn-terminate:hover { background: var(--red); color: #fff; }
+  .btn-terminate:disabled { opacity: 0.3; cursor: default; }
+
+  .no-alerts {
+    text-align: center; padding: 40px;
+    font-family: var(--mono); font-size: 13px; color: var(--subtext);
+  }
+
+  /* ── Encrypted files ── */
+  .files-panel { grid-column: 1 / 3; }
+  .files-list  { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .file-tag {
+    font-family: var(--mono); font-size: 11px;
+    padding: 4px 10px; border-radius: 3px;
+    border: 1px solid rgba(255,45,85,0.3);
+    background: rgba(255,45,85,0.08);
+    color: rgba(255,100,120,0.9);
+    animation: tagIn 0.3s ease-out;
+  }
+  @keyframes tagIn { from{opacity:0;transform:scale(0.85)} to{opacity:1;transform:scale(1)} }
+
+  .no-files { font-family: var(--mono); font-size: 12px; color: var(--subtext); padding: 8px 0; }
+
+  /* ── Entropy meter ── */
+  .entropy-panel { grid-column: 3 / 4; }
+
+  .entropy-bars { display: flex; flex-direction: column; gap: 10px; }
+
+  .entropy-row { display: flex; flex-direction: column; gap: 4px; }
+  .entropy-label {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px;
+  }
+  .entropy-filename { color: var(--text); }
+  .entropy-val      { color: var(--accent); }
+
+  .entropy-bar-bg {
+    height: 6px; border-radius: 3px;
+    background: var(--dim);
+    overflow: hidden;
+  }
+  .entropy-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--green), var(--accent));
+    transition: width 0.6s ease;
+  }
+  .entropy-bar-fill.mid {
+    background: linear-gradient(90deg, var(--accent), var(--yellow));
+  }
+  .entropy-bar-fill.danger {
+    background: linear-gradient(90deg, var(--orange), var(--red));
+  }
+
+  /* ── Scrollbar global ── */
+  * { scrollbar-width: thin; scrollbar-color: var(--accent) var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⬡</div>
+    <div>
+      <div class="logo-text">ENTROPYSHIELD</div>
+      <div class="logo-sub">LIVE DEFENSE DASHBOARD</div>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-dot">
+      <div class="dot" id="monitorDot"></div>
+      <span id="monitorLabel">MONITOR ACTIVE</span>
+    </div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<main>
+  <!-- Stat cards -->
+  <div class="stats-row">
+    <div class="stat-card" id="cardAlerts">
+      <div class="stat-label">Total Alerts</div>
+      <div class="stat-value red" id="valAlerts">0</div>
+      <div class="stat-sub" id="subAlerts">no incidents detected</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Files Encrypted</div>
+      <div class="stat-value yellow" id="valEncrypted">0</div>
+      <div class="stat-sub">in test_files/</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Peak Threat Score</div>
+      <div class="stat-value accent" id="valPeak">—</div>
+      <div class="stat-sub">threshold: 50 pts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Last Scan</div>
+      <div class="stat-value green" style="font-size:22px;margin-top:6px" id="valScan">—</div>
+      <div class="stat-sub">0.5 s polling interval</div>
+    </div>
+  </div>
+
+  <!-- Score chart -->
+  <div class="panel chart-panel">
+    <div class="panel-title">// threat score · live feed</div>
+    <div class="chart-wrap">
+      <canvas id="scoreChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Signal breakdown -->
+  <div class="panel breakdown-panel">
+    <div class="panel-title">// detection signals</div>
+    <div class="signal-row" id="sig-encrypted">
+      <div class="signal-icon">📄</div>
+      <div class="signal-info">
+        <div class="signal-name">.encrypted copy</div>
+        <div class="signal-desc">sibling file appeared</div>
+      </div>
+      <div class="signal-pts">+50</div>
+    </div>
+    <div class="signal-row" id="sig-entropy">
+      <div class="signal-icon">〜</div>
+      <div class="signal-info">
+        <div class="signal-name">High entropy</div>
+        <div class="signal-desc">&gt; 7.2 bits/byte</div>
+      </div>
+      <div class="signal-pts">+30</div>
+    </div>
+    <div class="signal-row" id="sig-header">
+      <div class="signal-icon">🔖</div>
+      <div class="signal-info">
+        <div class="signal-name">Header changed</div>
+        <div class="signal-desc">magic bytes deviated</div>
+      </div>
+      <div class="signal-pts">+15</div>
+    </div>
+    <div class="signal-row" id="sig-decrypt">
+      <div class="signal-icon">🔑</div>
+      <div class="signal-info">
+        <div class="signal-name">Decrypt failed</div>
+        <div class="signal-desc">key no longer valid</div>
+      </div>
+      <div class="signal-pts">+20</div>
+    </div>
+  </div>
+
+  <!-- Alerts feed -->
+  <div class="panel alerts-panel">
+    <div class="panel-title">// incident log</div>
+    <div class="alerts-list" id="alertsList">
+      <div class="no-alerts">⬡ &nbsp; no incidents detected &nbsp; ⬡</div>
+    </div>
+  </div>
+
+  <!-- Encrypted files -->
+  <div class="panel files-panel">
+    <div class="panel-title">// encrypted files detected</div>
+    <div class="files-list" id="filesList">
+      <div class="no-files">none yet</div>
+    </div>
+  </div>
+
+  <!-- Entropy monitor — normal files -->
+  <div class="panel entropy-panel">
+    <div class="panel-title">// normal file entropy monitor</div>
+    <div class="entropy-bars" id="entropyBars">
+      <div class="no-files">waiting for data…</div>
+    </div>
+  </div>
+
+  <!-- Entropy alerts -->
+  <div class="panel" style="grid-column: 1 / -1;">
+    <div class="panel-title">// entropy spike alerts &nbsp;<span style="color:var(--subtext);font-size:10px">threshold: +1.5 bits/byte jump from baseline</span></div>
+    <div id="entropyAlertsList">
+      <div class="no-files" style="padding:16px 0">no entropy spikes detected</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Clock ──────────────────────────────────────────────────────────────────
+function tick() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB', {hour12: false});
+}
+tick();
+setInterval(tick, 1000);
+
+// ── Chart setup ────────────────────────────────────────────────────────────
+const ctx   = document.getElementById('scoreChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels:   [],
+    datasets: [{
+      label:           'Threat Score',
+      data:            [],
+      borderColor:     '#00d4ff',
+      backgroundColor: 'rgba(0,212,255,0.07)',
+      borderWidth:     2,
+      pointRadius:     2,
+      pointHoverRadius:5,
+      fill:            true,
+      tension:         0.4,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 },
+    plugins: { legend: { display: false } },
+    scales: {
+      x: {
+        ticks: { color: '#4a7a8a', font: { family: "'Share Tech Mono'", size: 10 }, maxTicksLimit: 10 },
+        grid:  { color: 'rgba(13,34,51,0.8)' },
+      },
+      y: {
+        min: 0, max: 130,
+        ticks: { color: '#4a7a8a', font: { family: "'Share Tech Mono'", size: 10 }, stepSize: 25 },
+        grid:  { color: 'rgba(13,34,51,0.8)' },
+      }
+    }
+  }
+});
+
+// threshold line plugin
+Chart.register({
+  id: 'threshold',
+  afterDraw(chart) {
+    const { ctx, scales: { y }, chartArea: { left, right } } = chart;
+    const yPos = y.getPixelForValue(50);
+    ctx.save();
+    ctx.beginPath();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = 'rgba(255,210,0,0.5)';
+    ctx.lineWidth   = 1;
+    ctx.moveTo(left, yPos);
+    ctx.lineTo(right, yPos);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,210,0,0.7)';
+    ctx.font      = "10px 'Share Tech Mono'";
+    ctx.fillText('THRESHOLD 50', left + 6, yPos - 5);
+    ctx.restore();
+  }
+});
+
+// ── State ──────────────────────────────────────────────────────────────────
+let knownAlerts = 0;
+let peakScore   = 0;
+let lastAlertBreakdown = {};
+
+// ── Signal highlighting ────────────────────────────────────────────────────
+function updateSignals(breakdown) {
+  const map = {
+    'sig-encrypted': 'encrypted_file_found',
+    'sig-entropy':   'high_entropy',
+    'sig-header':    'header_changed',
+    'sig-decrypt':   'decrypt_failed',
+  };
+  for (const [id, key] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    el.classList.toggle('triggered', key in breakdown);
+  }
+}
+
+// ── Severity label ─────────────────────────────────────────────────────────
+function severity(score) {
+  if (score >= 80) return 'critical';
+  if (score >= 50) return 'high';
+  return 'medium';
+}
+
+// ── Render alerts ──────────────────────────────────────────────────────────
+function renderAlerts(events) {
+  const list = document.getElementById('alertsList');
+  if (!events.length) {
+    list.innerHTML = '<div class="no-alerts">⬡ &nbsp; no incidents detected &nbsp; ⬡</div>';
+    return;
+  }
+  list.innerHTML = '';
+  [...events].reverse().forEach(ev => {
+    const sev   = severity(ev.threat_score);
+    const bd    = ev.score_breakdown || {};
+    const item  = document.createElement('div');
+    item.className = `alert-item ${sev}`;
+    item.innerHTML = `
+      <div class="alert-severity ${sev}">${sev}</div>
+      <div class="alert-body">
+        <div class="alert-title">${ev.honeyfile} triggered</div>
+        <div class="alert-meta">
+          PID ${ev.attacker_pid || '—'} &nbsp;·&nbsp;
+          ${ev.encrypted_files} files encrypted &nbsp;·&nbsp;
+          ${ev.timestamp ? ev.timestamp.replace('T',' ').slice(0,19) : ''}
+          ${ev.recovered_key ? ' &nbsp;·&nbsp; KEY RECOVERED' : ''}
+        </div>
+      </div>
+      <div class="alert-score">${ev.threat_score}<span>pts</span></div>
+      <button class="btn-terminate"
+        ${ev.attacker_pid ? '' : 'disabled'}
+        onclick="terminate(${ev.attacker_pid}, this)">
+        TERMINATE
+      </button>`;
+    list.appendChild(item);
+
+    // update signal panel with the most recent breakdown
+    lastAlertBreakdown = bd;
+  });
+  updateSignals(lastAlertBreakdown);
+}
+
+// ── Render file tags ───────────────────────────────────────────────────────
+function renderFiles(files) {
+  const el = document.getElementById('filesList');
+  if (!files.length) {
+    el.innerHTML = '<div class="no-files">none yet</div>';
+    return;
+  }
+  el.innerHTML = files.map(f => `<div class="file-tag">${f}</div>`).join('');
+}
+
+// ── Entropy monitor ────────────────────────────────────────────────────────
+function renderEntropy(history, baselines, alerts) {
+  const el = document.getElementById('entropyBars');
+  const flagged = new Set(alerts.map(a => a.file));
+
+  if (!Object.keys(history).length) {
+    el.innerHTML = '<div class="no-files">waiting for data…</div>';
+    return;
+  }
+
+  el.innerHTML = Object.entries(history).map(([name, readings]) => {
+    if (!readings.length) return '';
+    const latest   = readings[readings.length - 1].entropy;
+    const baseline = baselines[name] ?? latest;
+    const jump     = latest - baseline;
+    const pct      = Math.min((latest / 8) * 100, 100).toFixed(1);
+    const spiked   = flagged.has(name);
+    const barColor = spiked ? 'danger' : (latest > 4.5 ? 'mid' : '');
+
+    return `
+      <div class="entropy-row" style="${spiked ? 'border:1px solid var(--red);border-radius:5px;padding:6px 8px;background:rgba(255,45,85,0.06)' : ''}">
+        <div class="entropy-label">
+          <span class="entropy-filename" style="${spiked ? 'color:var(--red)' : ''}">${name} ${spiked ? '⚠' : ''}</span>
+          <span class="entropy-val" style="${spiked ? 'color:var(--red)' : ''}">
+            ${latest} b/B &nbsp;
+            <span style="font-size:10px;color:var(--subtext)">base:${baseline.toFixed(2)}</span>
+            ${jump >= 0.1 ? `<span style="color:${spiked?'var(--red)':'var(--orange)'};margin-left:4px">+${jump.toFixed(2)}</span>` : ''}
+          </span>
+        </div>
+        <div class="entropy-bar-bg">
+          <div class="entropy-bar-fill ${barColor}" style="width:${pct}%"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderEntropyAlerts(alerts) {
+  const el = document.getElementById('entropyAlertsList');
+  if (!alerts.length) {
+    el.innerHTML = '<div class="no-files" style="padding:16px 0">no entropy spikes detected</div>';
+    return;
+  }
+  el.innerHTML = alerts.map(a => `
+    <div class="alert-item high" style="margin-bottom:8px">
+      <div class="alert-severity high">ENTROPY</div>
+      <div class="alert-body">
+        <div class="alert-title">${a.file} — entropy spike detected</div>
+        <div class="alert-meta">
+          baseline: ${a.baseline} bits/B &nbsp;→&nbsp;
+          current: <span style="color:var(--red)">${a.current} bits/B</span>
+          &nbsp;(+${a.jump}) &nbsp;·&nbsp; ${a.time}
+        </div>
+      </div>
+      <div class="alert-score" style="color:var(--orange)">${a.current}<span>bits/B</span></div>
+    </div>`).join('');
+}
+
+// ── Terminate button ───────────────────────────────────────────────────────
+async function terminate(pid, btn) {
+  btn.disabled = true;
+  btn.textContent = 'TERMINATING…';
+  const res = await fetch(`/api/terminate/${pid}`, { method: 'POST' });
+  const data = await res.json();
+  btn.textContent = data.success ? 'TERMINATED' : 'FAILED';
+}
+
+// ── Main poll loop ─────────────────────────────────────────────────────────
+async function poll() {
+  try {
+    const [statusRes, eventsRes, scoresRes, entropyRes] = await Promise.all([
+      fetch('/api/status'),
+      fetch('/api/events'),
+      fetch('/api/scores'),
+      fetch('/api/entropy'),
+    ]);
+    const status  = await statusRes.json();
+    const events  = await eventsRes.json();
+    const scores  = await scoresRes.json();
+    const entropy = await entropyRes.json();
+
+    // monitor status
+    const dot   = document.getElementById('monitorDot');
+    const label = document.getElementById('monitorLabel');
+    if (status.monitor.running) {
+      dot.classList.remove('offline');
+      label.textContent = 'MONITOR ACTIVE';
+    } else {
+      dot.classList.add('offline');
+      label.textContent = 'MONITOR OFFLINE';
+    }
+
+    // stat cards
+    const alertCount = events.length;
+    document.getElementById('valAlerts').textContent = alertCount;
+    document.getElementById('subAlerts').textContent =
+      alertCount ? `${alertCount} incident${alertCount > 1 ? 's' : ''} logged` : 'no incidents detected';
+    if (alertCount > 0) document.getElementById('cardAlerts').classList.add('alert-active');
+
+    document.getElementById('valEncrypted').textContent = status.encrypted_count;
+
+    if (status.monitor.last_scan) {
+      document.getElementById('valScan').textContent =
+        status.monitor.last_scan.replace('T',' ').slice(11,19);
+    }
+
+    // peak score
+    if (events.length) {
+      const maxScore = Math.max(...events.map(e => e.threat_score));
+      if (maxScore > peakScore) peakScore = maxScore;
+      document.getElementById('valPeak').textContent = peakScore;
+    }
+
+  // chart — only the __chart__ entries (one per tick, max score)
+  const chartPoints = scores.filter(s => s.file === '__chart__').slice(-40);
+  chart.data.labels   = chartPoints.map(s => s.time);
+  chart.data.datasets[0].data = chartPoints.map(s => s.score);
+
+    // colour the line based on latest value
+    const lastScore = chartPoints.length ? chartPoints[chartPoints.length-1].score : 0;
+    chart.data.datasets[0].borderColor     = lastScore >= 80 ? '#ff2d55' : lastScore >= 50 ? '#ff6b00' : '#00d4ff';
+    chart.data.datasets[0].backgroundColor = lastScore >= 80 ? 'rgba(255,45,85,0.07)' : 'rgba(0,212,255,0.07)';
+    chart.update('none');
+
+    // files
+    renderFiles(status.encrypted_files);
+
+    // alerts
+    if (events.length !== knownAlerts) {
+      knownAlerts = events.length;
+      renderAlerts(events);
+    }
+
+    // entropy — normal files
+    renderEntropy(entropy.history, entropy.baselines, entropy.alerts);
+    renderEntropyAlerts(entropy.alerts);
+
+  } catch(e) {
+    console.error('poll error', e);
+  }
+}
+
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
