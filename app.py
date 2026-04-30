@@ -3,6 +3,9 @@ import sys
 import json
 import math
 import time
+import hmac
+import hashlib
+import secrets
 import psutil
 import threading
 from pathlib import Path
@@ -19,12 +22,47 @@ score_history  = []          # rolling list of {time, file, score} for chart
 REGISTRY_PATH = Path.home() / ".honeyfile_registry.json"
 EVIDENCE_DIR  = Path.home() / "honeyfile_evidence"
 EVIDENCE_DIR.mkdir(exist_ok=True)
+HMAC_KEY_PATH = Path.home() / ".honeyfile_registry.hmac_key"
+HMAC_SIG_PATH = Path.home() / ".honeyfile_registry.sig"
+
+# ── HMAC-SHA256 registry protection ──────────────────────────────────────────
+
+def _load_or_create_hmac_key() -> bytes:
+    """Load persistent HMAC key, or generate and save a new one."""
+    if HMAC_KEY_PATH.exists():
+        return bytes.fromhex(HMAC_KEY_PATH.read_text().strip())
+    key = secrets.token_bytes(32)
+    HMAC_KEY_PATH.write_text(key.hex())
+    os.chmod(HMAC_KEY_PATH, 0o600)
+    return key
+
+def sign_registry(registry_bytes: bytes) -> str:
+    """Return hex HMAC-SHA256 of registry contents."""
+    key = _load_or_create_hmac_key()
+    return hmac.new(key, registry_bytes, hashlib.sha256).hexdigest()
+
+def verify_registry_signature(registry_bytes: bytes) -> bool:
+    """Return True if stored signature matches current registry contents."""
+    if not HMAC_SIG_PATH.exists():
+        print("[!] HMAC signature file missing — registry may have been tampered with")
+        return False
+    stored_sig = HMAC_SIG_PATH.read_text().strip()
+    expected   = sign_registry(registry_bytes)
+    if not hmac.compare_digest(stored_sig, expected):
+        print("[!!!] REGISTRY INTEGRITY FAILURE — HMAC mismatch, aborting monitor")
+        return False
+    return True
 
 SCORE_ENCRYPTED_FILE = 50
 SCORE_HIGH_ENTROPY   = 30
 SCORE_HEADER_CHANGED = 15
 SCORE_DECRYPT_FAILED = 20
 ALERT_THRESHOLD      = 50
+
+# ── Normal-file track thresholds ──────────────────────────────────────────────
+NORMAL_SCORE_PER_ENCRYPTED = 10   # points per .encrypted copy found
+NORMAL_SCORE_PER_SPIKE     = 15   # points per entropy spike confirmed
+NORMAL_ALERT_THRESHOLD     = 40   # fires when ≥3 files encrypted + spiked
 
 # ── Crypto-forensics helpers ──────────────────────────────────────────────────
 
@@ -106,8 +144,6 @@ def compute_score(honeyfile, reg_entry, original_path):
 
     breakdown["total_score"] = score
     return score, breakdown
-
-# ── Normal file entropy tracking ─────────────────────────────────────────────
 file_entropy_history = {}   # {filename: [{"time": t, "entropy": e}, ...]}
 file_baselines       = {}   # {filename: baseline_entropy}
 ENTROPY_JUMP_THRESH  = 1.5  # bits/byte rise considered suspicious
@@ -162,10 +198,52 @@ def scan_normal_files():
 
     return flagged
 
+def compute_normal_score() -> tuple[int, dict]:
+    """
+    Second scoring track — runs on normal files, no registry needed.
+    Returns (score, breakdown). Fires independently of the honeyfile track.
+    Signals:
+      - 10 pts per .encrypted copy of a normal file found
+      - 15 pts per confirmed entropy spike (jump >= ENTROPY_JUMP_THRESH)
+    Threshold: NORMAL_ALERT_THRESHOLD (40 pts → ≥ 3 files encrypted+spiked)
+    """
+    test_dir = Path("test_files")
+    if not test_dir.exists():
+        return 0, {}
+
+    encrypted_copies = []
+    spiked_files     = []
+    spiked_set       = {a["file"] for a in entropy_alerts}
+
+    for ef in test_dir.iterdir():
+        if ef.suffix != ".encrypted":
+            continue
+        original_name = ef.stem
+        if original_name in ("admin_honey.txt", "audit_trace.txt"):
+            continue
+        if not ef.is_file():
+            continue
+        encrypted_copies.append(original_name)
+        if original_name in spiked_set:
+            spiked_files.append(original_name)
+
+    score = (len(encrypted_copies) * NORMAL_SCORE_PER_ENCRYPTED +
+             len(spiked_files)     * NORMAL_SCORE_PER_SPIKE)
+
+    breakdown = {
+        "encrypted_normal_files":  len(encrypted_copies),
+        "entropy_spiked_files":    len(spiked_files),
+        "encrypted_score":         len(encrypted_copies) * NORMAL_SCORE_PER_ENCRYPTED,
+        "entropy_score":           len(spiked_files)     * NORMAL_SCORE_PER_SPIKE,
+        "total_score":             score,
+        "track":                   "normal_files",
+    }
+    return score, breakdown
+
 def get_attacker_pid():
     for proc in psutil.process_iter(['pid', 'name']):
         try:
-            if proc.info['name'] and 'anagha_ransomware' in proc.info['name'].lower():
+            if proc.info['name'] and 'ransomware_agent' in proc.info['name'].lower():
                 return proc.info['pid']
         except Exception:
             continue
@@ -222,7 +300,12 @@ def monitor_loop():
         print("[!] Registry not found. Run: python app.py seed")
         return
 
-    registry   = json.loads(REGISTRY_PATH.read_text())
+    registry_bytes = REGISTRY_PATH.read_bytes()
+    if not verify_registry_signature(registry_bytes):
+        monitor_status["running"] = False
+        return
+
+    registry   = json.loads(registry_bytes)
     honeyfiles = {Path(p).name: (p, v) for p, v in registry.items()}
 
     monitor_status["running"]    = True
@@ -293,6 +376,44 @@ def monitor_loop():
             except Exception as e:
                 print(f"[!] scan_normal_files error: {e}")
 
+            # ── Normal-file scoring track (fallback if honeyfiles avoided) ──
+            try:
+                n_score, n_breakdown = compute_normal_score()
+
+                # push to chart history so it shows on the live graph
+                if n_score > tick_max:
+                    tick_max       = n_score
+                    tick_breakdown = n_breakdown
+
+                score_history.append({
+                    "time":      tick_time,
+                    "file":      "__normal_track__",
+                    "score":     n_score,
+                    "breakdown": n_breakdown,
+                })
+
+                if n_score >= NORMAL_ALERT_THRESHOLD and "normal_track" not in alerted:
+                    alerted.add("normal_track")
+                    try:
+                        encrypted_count = len(list(Path("test_files").glob("*.encrypted")))
+                        pid  = get_attacker_pid()
+                        if pid:
+                            suspend_attacker(pid)
+                        key    = recover_key()
+                        report = write_report(
+                            "normal_file_track", pid, key,
+                            encrypted_count, n_score, n_breakdown
+                        )
+                        alert_events.append(report)
+                        print(f"[!!!] NORMAL-TRACK ALERT  score={n_score}  "
+                              f"({n_breakdown['encrypted_normal_files']} files encrypted, "
+                              f"{n_breakdown['entropy_spiked_files']} spiked)")
+                    except Exception as e:
+                        print(f"[!] Normal-track alert error: {e}")
+
+            except Exception as e:
+                print(f"[!] compute_normal_score error: {e}")
+
         except Exception as e:
             print(f"[!] Monitor loop error: {e}")
 
@@ -308,11 +429,15 @@ def index():
 
 @app.route('/api/health')
 def health():
+    registry_ok = False
+    if REGISTRY_PATH.exists():
+        registry_ok = verify_registry_signature(REGISTRY_PATH.read_bytes())
     return jsonify({
-        "monitor_running": monitor_status["running"],
-        "last_scan":       monitor_status["last_scan"],
+        "monitor_running":   monitor_status["running"],
+        "last_scan":         monitor_status["last_scan"],
         "score_history_len": len(score_history),
-        "alert_count":     len(alert_events),
+        "alert_count":       len(alert_events),
+        "registry_integrity": registry_ok,
     })
 
 @app.route('/api/status')
@@ -390,7 +515,12 @@ def seed_honeyfiles():
             "created":          datetime.now().isoformat(),
         }
 
-    REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+    registry_bytes = json.dumps(registry, indent=2).encode()
+    REGISTRY_PATH.write_text(registry_bytes.decode())
+    sig = sign_registry(registry_bytes)
+    HMAC_SIG_PATH.write_text(sig)
+    os.chmod(HMAC_SIG_PATH, 0o600)
+    print(f"[+] Registry signed  (HMAC-SHA256: {sig[:16]}...)")
     print(f"[+] Seeded {len(LOCATIONS)} honeyfiles")
 
 # ── Entry point ───────────────────────────────────────────────────────────────

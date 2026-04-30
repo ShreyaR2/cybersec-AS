@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Ransomware Detection Dashboard</title>
+<title>RansomShield — Live Defense Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
@@ -353,8 +353,8 @@
   <div class="logo">
     <div class="logo-icon">⬡</div>
     <div>
-      <div class="logo-text">RANSOMWARE DETECTION</div>
-      <div class="logo-sub">Live Defence Dashboard</div>
+      <div class="logo-text">RANSOMSHIELD</div>
+      <div class="logo-sub">LIVE DEFENSE DASHBOARD</div>
     </div>
   </div>
   <div class="header-right">
@@ -520,18 +520,33 @@ Chart.register({
   id: 'threshold',
   afterDraw(chart) {
     const { ctx, scales: { y }, chartArea: { left, right } } = chart;
-    const yPos = y.getPixelForValue(50);
+
+    // honeyfile threshold — 50
+    const yPos50 = y.getPixelForValue(50);
     ctx.save();
     ctx.beginPath();
     ctx.setLineDash([5, 4]);
     ctx.strokeStyle = 'rgba(255,210,0,0.5)';
     ctx.lineWidth   = 1;
-    ctx.moveTo(left, yPos);
-    ctx.lineTo(right, yPos);
+    ctx.moveTo(left, yPos50);
+    ctx.lineTo(right, yPos50);
     ctx.stroke();
     ctx.fillStyle = 'rgba(255,210,0,0.7)';
     ctx.font      = "10px 'Share Tech Mono'";
-    ctx.fillText('THRESHOLD 50', left + 6, yPos - 5);
+    ctx.fillText('HONEYFILE THRESHOLD 50', left + 6, yPos50 - 5);
+
+    // normal-file track threshold — 40
+    const yPos40 = y.getPixelForValue(40);
+    ctx.beginPath();
+    ctx.setLineDash([3, 5]);
+    ctx.strokeStyle = 'rgba(0,255,136,0.4)';
+    ctx.lineWidth   = 1;
+    ctx.moveTo(left, yPos40);
+    ctx.lineTo(right, yPos40);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0,255,136,0.6)';
+    ctx.fillText('NORMAL-FILE THRESHOLD 40', left + 6, yPos40 - 5);
+
     ctx.restore();
   }
 });
@@ -722,13 +737,21 @@ async function poll() {
       document.getElementById('valPeak').textContent = peakScore;
     }
 
-  // chart — only the __chart__ entries (one per tick, max score)
+  // chart — __chart__ entries (honeyfile max) + __normal_track__ entries
   const chartPoints = scores.filter(s => s.file === '__chart__').slice(-40);
-  chart.data.labels   = chartPoints.map(s => s.time);
-  chart.data.datasets[0].data = chartPoints.map(s => s.score);
+  const normalPoints = scores.filter(s => s.file === '__normal_track__').slice(-40);
+
+  // merge by index — take max of honeyfile score vs normal track score per tick
+  const mergedScores = chartPoints.map((p, i) => ({
+    time:  p.time,
+    score: Math.max(p.score, normalPoints[i] ? normalPoints[i].score : 0)
+  }));
+
+  chart.data.labels   = mergedScores.map(s => s.time);
+  chart.data.datasets[0].data = mergedScores.map(s => s.score);
 
     // colour the line based on latest value
-    const lastScore = chartPoints.length ? chartPoints[chartPoints.length-1].score : 0;
+    const lastScore = mergedScores.length ? mergedScores[mergedScores.length-1].score : 0;
     chart.data.datasets[0].borderColor     = lastScore >= 80 ? '#ff2d55' : lastScore >= 50 ? '#ff6b00' : '#00d4ff';
     chart.data.datasets[0].backgroundColor = lastScore >= 80 ? 'rgba(255,45,85,0.07)' : 'rgba(0,212,255,0.07)';
     chart.update('none');

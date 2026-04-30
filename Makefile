@@ -2,7 +2,7 @@ CXX      = g++
 CXXFLAGS = -std=c++17 -Wall -O2 -pthread
 LDFLAGS  = -lssl -lcrypto -pthread
 
-TARGET  = anagha_ransomware
+TARGET  = ransomware_agent
 SOURCES = src/main.cpp src/encryption.cpp
 
 all: $(TARGET)
